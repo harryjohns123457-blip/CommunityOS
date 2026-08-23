@@ -1,40 +1,34 @@
-import Redis from 'redis';
-import { config } from './env.js';
+import { createClient } from 'redis';
 
 let redisClient = null;
 
 export async function initializeRedis() {
   if (redisClient) return redisClient;
 
-  redisClient = Redis.createClient({ url: config.REDIS_URL });
-
-  redisClient.on('error', (err) => console.error('Redis Client Error', err));
-  redisClient.on('connect', () => console.log('✓ Redis connected'));
-  redisClient.on('ready', () => console.log('✓ Redis ready'));
-
   try {
-    await redisClient.connect();
-  } catch (err) {
-    console.error('Redis connection failed:', err?.message || err);
-    throw err;
-  }
+    redisClient = createClient({
+      url: process.env.REDIS_URL || 'redis://localhost:6379',
+    });
 
-  return redisClient;
+    await redisClient.connect();
+    console.log('✓ Redis connected');
+    return redisClient;
+  } catch (error) {
+    console.error('Redis connection failed:', error.message);
+    throw error;
+  }
 }
 
-export function getRedis() {
-  if (!redisClient) throw new Error('Redis not initialized. Call initializeRedis() first.');
+export function getRedisClient() {
+  if (!redisClient) {
+    throw new Error('Redis not initialized');
+  }
   return redisClient;
 }
 
 export async function closeRedis() {
   if (redisClient) {
-    try {
-      await redisClient.quit();
-    } catch (err) {
-      try { await redisClient.disconnect(); } catch (_) {}
-    } finally {
-      redisClient = null;
-    }
+    await redisClient.quit();
+    redisClient = null;
   }
 }

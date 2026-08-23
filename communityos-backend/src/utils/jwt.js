@@ -1,24 +1,27 @@
 import jwt from 'jsonwebtoken';
-import { config } from '../config/env.js';
-import logger from './logger.js';
+import { AuthenticationError } from './errors.js';
 
-export function generateToken(payload, expiresIn = config.JWT_EXPIRES_IN) {
-  return jwt.sign(payload, config.JWT_SECRET, { expiresIn });
+const SECRET = process.env.JWT_SECRET || 'your_super_secret_jwt_key_change_this_in_production';
+const EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+
+export function signToken(payload) {
+  return jwt.sign(payload, SECRET, {
+    expiresIn: EXPIRES_IN,
+  });
 }
 
 export function verifyToken(token) {
   try {
-    return jwt.verify(token, config.JWT_SECRET);
+    return jwt.verify(token, SECRET);
   } catch (error) {
-    logger.error('Token verification failed:', error.message);
-    return null;
+    throw new AuthenticationError('Invalid token');
   }
 }
 
-export function decodeToken(token) {
-  return jwt.decode(token);
-}
+export function extractToken(authHeader) {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new AuthenticationError('No token provided');
+  }
 
-export function refreshToken(payload) {
-  return generateToken(payload, config.JWT_EXPIRES_IN);
+  return authHeader.slice(7);
 }
