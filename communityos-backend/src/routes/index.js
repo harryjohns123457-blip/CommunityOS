@@ -1,17 +1,31 @@
 import express from 'express';
-
-import authRoutes from './auth.routes.js';
-import communitiesRoutes from './communities.routes.js';
-import ordersRoutes from './orders.routes.js';
-import providerRoutes from './provider.routes.js';
-import servicesRoutes from './services.routes.js';
+import authRouter from './auth.js';
+import ordersRouter from './orders.js';
+import servicesRouter from './services.js';
+import providersRouter from './providers.js';
+import communitiesRouter from './communities.js';
 
 const router = express.Router();
 
-router.use('/auth', authRoutes);
-router.use('/communities', communitiesRoutes);
-router.use('/orders', ordersRoutes);
-router.use('/providers', providerRoutes);
-router.use('/services', servicesRoutes);
+router.get('/health', (req, res) => {
+  res.json({
+    success: true,
+    message: 'API is healthy',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+router.use('/auth', authRouter);
+router.use('/orders', ordersRouter);
+router.use('/services', servicesRouter);
+router.use('/providers', providersRouter);
+router.use('/communities', communitiesRouter);
+
+router.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.path}`,
+  });
+});
 
 export default router;
