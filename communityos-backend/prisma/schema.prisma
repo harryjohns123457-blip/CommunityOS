@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                String             @id @default(uuid())
+  tenantId          String
+  email             String
+  passwordHash      String
+  fullName          String?
+  phone             String?
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  auditLogs         AuditLog[]
+  Job               Job[]
+  orders            Order[]            @relation("resident_orders")
+  providers         Provider[]
+  providerEmployees ProviderEmployee[]
+  roles             UserRole[]
+
+  @@unique([tenantId, email])
+}
+
+model UserRole {
+  id         String   @id @default(uuid())
+  userId     String
+  tenantId   String
+  role       RoleName
+  resourceId String?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, userId])
+}
+
+model Community {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  address   String?
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+}
+
+model Provider {
+  id                 String             @id @default(uuid())
+  tenantId           String
+  companyName        String
+  contact            String?
+  verificationStatus String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  userId             String?
+  orders             Order[]
+  user               User?              @relation(fields: [userId], references: [id])
+  employees          ProviderEmployee[]
+  services           Service[]
+
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model ProviderEmployee {
+  id         String   @id @default(uuid())
+  providerId String
+  userId     String?
+  role       String
+  createdAt  DateTime @default(now())
+  provider   Provider @relation(fields: [providerId], references: [id])
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([providerId])
+  @@index([userId])
+}
+
+model Service {
+  id          String      @id @default(uuid())
+  providerId  String
+  tenantId    String
+  name        String
+  description String?
+  unitPrice   Float
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  orderItems  OrderItem[]
+  provider    Provider    @relation(fields: [providerId], references: [id])
+
+  @@index([providerId])
+  @@index([tenantId])
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  tenantId       String
+  residentId     String
+  communityId    String?
+  providerId     String?
+  status         OrderStatus @default(CREATED)
+  total          Float       @default(0)
+  notes          String?
+  idempotencyKey String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  job       Job?
+  community Community?  @relation(fields: [communityId], references: [id])
+  provider  Provider?   @relation(fields: [providerId], references: [id])
+  resident  User        @relation("resident_orders", fields: [residentId], references: [id])
+  items     OrderItem[]
+  payment   Payment?
+  events    Event[]
+
+  @@index([tenantId])
+  @@index([residentId])
+  @@index([providerId])
+  @@index([idempotencyKey])
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  serviceId String
+  quantity  Int
+  unitPrice Float
+  order     Order   @relation(fields: [orderId], references: [id])
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  @@index([orderId])
+  @@index([serviceId])
+}
+
+model Job {
+  id          String    @id @default(uuid())
+  orderId     String    @unique
+  workerId    String?
+  status      String
+  scheduledAt DateTime?
+  completedAt DateTime?
+  order       Order     @relation(fields: [orderId], references: [id])
+  worker      User?     @relation(fields: [workerId], references: [id])
+
+  @@index([workerId])
+}
+
+model Event {
+  id        String   @id @default(uuid())
+  tenantId  String
+  orderId   String?
+  type      String
+  actorId   String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  order Order? @relation(fields: [orderId], references: [id])
+
+  @@index([tenantId])
+  @@index([orderId])
+  @@index([actorId])
+}
+
+model Payment {
+  id        String        @id @default(uuid())
+  orderId   String        @unique
+  amount    Float
+  status    PaymentStatus @default(PENDING)
+  reference String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  order     Order         @relation(fields: [orderId], references: [id])
+}
+
+enum RoleName {
+  RESIDENT
+  MANAGER
+  PROVIDER_REP
+  WORKER
+  PLATFORM_ADMIN
+}
+
+enum OrderStatus {
+  CREATED
+  PROVIDER_ACCEPTED
+  WORKER_ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
