@@ -1,110 +1,57 @@
-import { getUserFromToken } from '../config/supabase.js';
-import { prisma } from '../db/connection.js';
+import { verifyToken, extractToken } from '../utils/jwt.js';
+import { AuthenticationError } from '../utils/errors.js';
+import logger from '../config/logger.js';
 
-function extractToken(req) {
-  const authHeader = req.headers.authorization;
-
-  if (authHeader?.startsWith('Bearer ')) {
-    return authHeader.substring(7);
-  }
-
-  if (req.cookies?.token) {
-    return req.cookies.token;
-  }
-
-  if (req.cookies?.access_token) {
-    return req.cookies.access_token;
-  }
-
-  return null;
-}
-
-export async function authMiddleware(req, res, next) {
+export function authMiddleware(req, res, next) {
   try {
-    const token = extractToken(req);
+    const authHeader = req.headers.authorization;
+    const token = extractToken(authHeader);
+    const decoded = verifyToken(token);
 
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required',
-      });
-    }
-
-    // Validate the Supabase access token
-    const supabaseUser = await getUserFromToken(token);
-
-    if (!supabaseUser) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid or expired authentication token',
-      });
-    }
-
-    // Find the corresponding local CommunityOS user
-    const user = await prisma.user.findUnique({
-      where: {
-        id: supabaseUser.id,
-      },
-      include: {
-        roles: true,
-        providers: true,
-        providerEmployees: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'CommunityOS user account not found',
-      });
-    }
-
-    if (!user.isActive) {
-      return res.status(403).json({
-        success: false,
-        message: 'User account is inactive',
-      });
-    }
-
-    req.user = user;
-    req.supabaseUser = supabaseUser;
+    req.user = decoded;
+    req.token = token;
 
     next();
   } catch (error) {
-    console.error('Authentication error:', error);
-
-    return res.status(401).json({
+    logger.warn({ error: error.message }, 'Authentication failed');
+    res.status(401).json({
       success: false,
-      message: 'Invalid or expired authentication token',
+      message: error.message || 'Unauthorized',
     });
   }
 }
 
-export function requireRole(...allowedRoles) {
+export function tenantMiddleware(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      message: 'Not authenticated',
+    });
+  }
+
+  req.tenantId = req.user.tenantId;
+  next();
+}
+
+export function roleMiddleware(...allowedRoles) {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
         success: false,
-        message: 'Authentication required',
+        message: 'Not authenticated',
       });
     }
 
-    const userRoles = Array.isArray(req.user.roles)
-      ? req.user.roles.map((role) =>
-          typeof role === 'string'
-            ? role
-            : role.role || role.name
-        )
-      : [];
+    const userRole = req.user.role;
 
-    const hasRole = allowedRoles.some((role) =>
-      userRoles.includes(role)
-    );
-
-    if (!hasRole) {
+    if (!allowedRoles.includes(userRole)) {
+      logger.warn(
+        { userId: req.user.id, userRole, allowedRoles },
+        'Authorization failed'
+      );
       return res.status(403).json({
         success: false,
-        message: 'You do not have permission to perform this action',
+        message: 'Insufficient permissions',
       });
     }
 
@@ -112,10 +59,15 @@ export function requireRole(...allowedRoles) {
   };
 }
 
-export function getUserId(req) {
-  return req.user?.id;
-}
+export function errorHandler(err, req, res, next) {
+  logger.error({ error: err }, 'Request error');
 
-export function getTenantId(req) {
-  return req.user?.tenantId;
+  const statusCode = err.statusCode || 500;
+  const message = err.message || 'Internal server error';
+
+  res.status(statusCode).json({
+    success: false,
+    message,
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+  });
 }
