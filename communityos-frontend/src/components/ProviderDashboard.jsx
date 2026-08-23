@@ -1,412 +1,150 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  AlertCircle,
-  ArrowRight,
-  CheckCircle2,
-  Clock3,
-  MapPin,
-  Package,
-  RefreshCw,
-  Truck,
-} from "lucide-react";
-
-import { getOrders, updateOrder } from "../services/api";
-
-const STATUS = {
-  PENDING: "PENDING",
-  CONFIRMED: "CONFIRMED",
-  IN_PROGRESS: "IN_PROGRESS",
-  COMPLETED: "COMPLETED",
-  CANCELLED: "CANCELLED",
-};
-
-function formatStatus(status) {
-  return String(status || "PENDING")
-    .replaceAll("_", " ")
-    .toLowerCase()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function formatDate(date) {
-  if (!date) return "Recently";
-
-  const value = new Date(date);
-
-  if (Number.isNaN(value.getTime())) {
-    return "Recently";
-  }
-
-  return value.toLocaleDateString("en-KE", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, Loader, Truck, CheckCircle } from 'lucide-react';
+import * as providerService from '../services/providers.js';
 
 export default function ProviderDashboard({ token, user }) {
+  const [providers, setProviders] = useState([]);
+  const [selectedProvider, setSelectedProvider] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [updatingId, setUpdatingId] = useState(null);
-  const [error, setError] = useState("");
-
-  async function loadOrders() {
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await getOrders({
-        limit: 100,
-      });
-
-      const data =
-        response?.data?.data ||
-        response?.data?.orders ||
-        response?.data ||
-        [];
-
-      setOrders(Array.isArray(data) ? data : []);
-    } catch (err) {
-      setError(
-        err?.message ||
-          "Unable to load provider orders."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [filter, setFilter] = useState('CREATED');
 
   useEffect(() => {
+    async function loadProviders() {
+      try {
+        setLoading(true);
+        const data = await providerService.getProviders();
+        setProviders(data || []);
+        if (data?.length > 0) {
+          setSelectedProvider(data[0]);
+        }
+      } catch (error) {
+        console.error('Failed to load providers:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
     if (token) {
-      loadOrders();
+      loadProviders();
     }
   }, [token]);
 
-  const pendingOrders = useMemo(
-    () =>
-      orders.filter(
-        (order) =>
-          String(order.status || "").toUpperCase() ===
-          STATUS.PENDING
-      ),
-    [orders]
-  );
+  useEffect(() => {
+    async function loadOrders() {
+      if (!selectedProvider) return;
 
-  const activeOrders = useMemo(
-    () =>
-      orders.filter((order) =>
-        [
-          STATUS.CONFIRMED,
-          STATUS.IN_PROGRESS,
-        ].includes(
-          String(order.status || "").toUpperCase()
-        )
-      ),
-    [orders]
-  );
+      try {
+        const data = await providerService.getProviderOrders(
+          selectedProvider.id,
+          filter
+        );
+        setOrders(data || []);
+      } catch (error) {
+        console.error('Failed to load orders:', error);
+      }
+    }
 
-  const completedOrders = useMemo(
-    () =>
-      orders.filter(
-        (order) =>
-          String(order.status || "").toUpperCase() ===
-          STATUS.COMPLETED
-      ),
-    [orders]
-  );
+    loadOrders();
+  }, [selectedProvider, filter]);
 
-  async function changeStatus(orderId, status) {
-    setUpdatingId(orderId);
-    setError("");
-
+  async function handleAcceptOrder(orderId) {
     try {
-      await updateOrder(orderId, {
-        status,
-      });
-
-      await loadOrders();
-    } catch (err) {
-      setError(
-        err?.message ||
-          "Unable to update this request."
+      await providerService.acceptOrder(selectedProvider.id, orderId);
+      // Reload orders
+      const data = await providerService.getProviderOrders(
+        selectedProvider.id,
+        filter
       );
-    } finally {
-      setUpdatingId(null);
+      setOrders(data);
+    } catch (error) {
+      console.error('Failed to accept order:', error);
     }
   }
 
+  if (loading) {
+    return <div className="page-content-center"><Loader className="spinner" /></div>;
+  }
+
   return (
-    <section className="provider-page">
-      <div className="page-heading">
-        <div>
-          <span className="section-kicker">
-            PROVIDER OPERATIONS
-          </span>
-
-          <h1>Service operations</h1>
-
-          <p>
-            Manage incoming requests and keep customers
-            informed as work progresses.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={loadOrders}
-          disabled={loading}
-        >
-          <RefreshCw
-            size={16}
-            className={loading ? "spin" : ""}
-          />
-          Refresh
-        </button>
+    <div className="provider-dashboard">
+      <div className="page-header">
+        <h1>Provider Operations</h1>
+        <p>
+          {selectedProvider?.companyName ||  'Service Provider Dashboard'}
+        </p>
       </div>
 
-      <div className="provider-welcome">
-        <div className="provider-welcome-icon">
-          <Truck size={23} />
-        </div>
-
-        <div>
-          <span className="section-kicker">
-            PROVIDER WORKSPACE
-          </span>
-
-          <h2>
-            Welcome back
-            {user?.fullName
-              ? `, ${user.fullName.split(" ")[0]}`
-              : ""}
-            .
-          </h2>
-
-          <p>
-            Here is the current workload for your service
-            operation.
-          </p>
-        </div>
-      </div>
-
-      {error && (
-        <div className="dashboard-error" role="alert">
-          <AlertCircle size={18} />
-          {error}
-        </div>
-      )}
-
-      <div className="provider-metrics">
-        <article className="provider-metric">
-          <div className="metric-icon">
-            <Clock3 size={19} />
-          </div>
-
-          <span>New requests</span>
-
-          <strong>
-            {loading ? "—" : pendingOrders.length}
-          </strong>
-        </article>
-
-        <article className="provider-metric">
-          <div className="metric-icon">
-            <Truck size={19} />
-          </div>
-
-          <span>Active jobs</span>
-
-          <strong>
-            {loading ? "—" : activeOrders.length}
-          </strong>
-        </article>
-
-        <article className="provider-metric">
-          <div className="metric-icon">
-            <CheckCircle2 size={19} />
-          </div>
-
-          <span>Completed</span>
-
-          <strong>
-            {loading ? "—" : completedOrders.length}
-          </strong>
-        </article>
-      </div>
-
-      <section className="provider-orders-section">
-        <div className="section-header">
-          <div>
-            <span className="section-kicker">
-              WORK QUEUE
-            </span>
-
-            <h2>Service requests</h2>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="provider-order-list">
-            {[1, 2, 3].map((item) => (
-              <div
-                className="activity-skeleton"
-                key={item}
-              />
+      <div className="provider-layout">
+        <aside className="provider-sidebar">
+          <h3>Your Providers</h3>
+          <div className="providers-list">
+            {providers.map((provider) => (
+              <button
+                key={provider.id}
+                className={`provider-item ${selectedProvider?.id === provider.id ? 'active' : ''}`}
+                onClick={() => setSelectedProvider(provider)}
+              >
+                <Truck size={18} />
+                <div>
+                  <p>{provider.companyName}</p>
+                  <span>{provider.services?.length || 0} services</span>
+                </div>
+              </button>
             ))}
           </div>
-        ) : orders.length === 0 ? (
-          <div className="empty-card">
-            <Package size={28} />
+        </aside>
 
-            <h2>No service requests</h2>
-
-            <p>
-              New customer requests will appear here.
-            </p>
-          </div>
-        ) : (
-          <div className="provider-order-list">
-            {orders.map((order) => {
-              const status = String(
-                order.status || STATUS.PENDING
-              ).toUpperCase();
-
-              const updating = updatingId === order.id;
-
-              return (
-                <article
-                  className="provider-order-card"
-                  key={order.id}
+        <main className="provider-main">
+          <div className="filter-tabs">
+            {['CREATED', 'PROVIDER_ACCEPTED', 'IN_PROGRESS', 'COMPLETED'].map(
+              (status) => (
+                <button
+                  key={status}
+                  className={`filter-tab ${filter === status ? 'active' : ''}`}
+                  onClick={() => setFilter(status)}
                 >
-                  <div className="provider-order-icon">
-                    <Package size={20} />
-                  </div>
-
-                  <div className="provider-order-content">
-                    <div className="provider-order-heading">
-                      <div>
-                        <span className="activity-date">
-                          #{order.id} ·{" "}
-                          {formatDate(
-                            order.createdAt ||
-                              order.created_at
-                          )}
-                        </span>
-
-                        <h3>
-                          {order.service?.name ||
-                            order.serviceName ||
-                            "Service request"}
-                        </h3>
-                      </div>
-
-                      <span
-                        className={`status-badge status-${status.toLowerCase()}`}
-                      >
-                        {formatStatus(status)}
-                      </span>
-                    </div>
-
-                    <div className="provider-order-details">
-                      <div>
-                        <span>Quantity</span>
-
-                        <strong>
-                          {order.quantity || 1}
-                        </strong>
-                      </div>
-
-                      {order.location && (
-                        <div>
-                          <span>Location</span>
-
-                          <strong>
-                            <MapPin size={14} />
-                            {order.location}
-                          </strong>
-                        </div>
-                      )}
-                    </div>
-
-                    {order.notes && (
-                      <p className="activity-notes">
-                        {order.notes}
-                      </p>
-                    )}
-
-                    <div className="provider-order-actions">
-                      {status === STATUS.PENDING && (
-                        <button
-                          type="button"
-                          className="primary-button small"
-                          disabled={updating}
-                          onClick={() =>
-                            changeStatus(
-                              order.id,
-                              STATUS.CONFIRMED
-                            )
-                          }
-                        >
-                          {updating
-                            ? "Updating..."
-                            : "Accept request"}
-                          {!updating && (
-                            <ArrowRight size={15} />
-                          )}
-                        </button>
-                      )}
-
-                      {status === STATUS.CONFIRMED && (
-                        <button
-                          type="button"
-                          className="primary-button small"
-                          disabled={updating}
-                          onClick={() =>
-                            changeStatus(
-                              order.id,
-                              STATUS.IN_PROGRESS
-                            )
-                          }
-                        >
-                          Start job
-                          <ArrowRight size={15} />
-                        </button>
-                      )}
-
-                      {status === STATUS.IN_PROGRESS && (
-                        <button
-                          type="button"
-                          className="primary-button small"
-                          disabled={updating}
-                          onClick={() =>
-                            changeStatus(
-                              order.id,
-                              STATUS.COMPLETED
-                            )
-                          }
-                        >
-                          Mark completed
-                          <CheckCircle2 size={15} />
-                        </button>
-                      )}
-
-                      {[
-                        STATUS.COMPLETED,
-                        STATUS.CANCELLED,
-                      ].includes(status) && (
-                        <span className="completed-label">
-                          <CheckCircle2 size={15} />
-                          Request closed
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
+                  {status.replace(/_/g, ' ')}
+                </button>
+              )
+            )}
           </div>
-        )}
-      </section>
-    </section>
+
+          <div className="orders-grid">
+            {orders.length === 0 ? (
+              <div className="empty-state">
+                <AlertCircle size={40} />
+                <p>No orders with this status</p>
+              </div>
+            ) : (
+              orders.map((order) => (
+                <div key={order.id} className="order-card">
+                  <div className="order-card-header">
+                    <h4>Order #{order.id.slice(0, 8)}</h4>
+                    <span className="status-badge">{order.status}</span>
+                  </div>
+                  <div className="order-card-body">
+                    <p><strong>Resident:</strong> {order.resident?.fullName}</p>
+                    <p><strong>Phone:</strong> {order.resident?.phone}</p>
+                    <p><strong>Total:</strong> KSh {order.total}</p>
+                    <p><strong>Items:</strong> {order.items?.length}</p>
+                  </div>
+                  <div className="order-card-footer">
+                    {order.status === 'CREATED' && (
+                      <button
+                        className="btn btn-sm btn-success"
+                        onClick={() => handleAcceptOrder(order.id)}
+                      >
+                        <CheckCircle size={16} /> Accept Order
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </main>
+      </div>
+    </div>
   );
 }

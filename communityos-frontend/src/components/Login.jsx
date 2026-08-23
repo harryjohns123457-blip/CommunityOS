@@ -1,366 +1,121 @@
-import { useState } from "react";
-import {
-  ArrowRight,
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  LockKeyhole,
-  Mail,
-  ShieldCheck,
-  Sparkles,
-  Users,
-  Zap,
-} from "lucide-react";
+import React, { useState } from 'react';
+import { Mail, Lock, User, Phone, Building2 } from 'lucide-react';
+import * as authService from '../services/auth.js';
 
-import { login } from "../services/api";
+const TENANTS = [
+  { id: 'green-valley', name: 'Green Valley Estate' },
+  { id: 'sunrise', name: 'Sunrise Apartments' },
+  { id: 'westlands', name: 'Westlands Residence' },
+];
 
 export default function Login({ onLogin, onRegister }) {
-  const [form, setForm] = useState({
-    email: "",
-    password: "",
-  });
-
-  const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [tenantId, setTenantId] = useState('green-valley');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
 
-  function handleChange(event) {
-    const { name, value } = event.target;
-
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-
-    if (error) {
-      setError("");
-    }
-  }
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-
-    if (!form.email.trim()) {
-      setError("Please enter your email address.");
-      return;
-    }
-
-    if (!form.password) {
-      setError("Please enter your password.");
-      return;
-    }
-
+  async function handleLogin(e) {
+    e.preventDefault();
+    setError('');
     setLoading(true);
-    setError("");
 
     try {
-      const response = await login({
-        email: form.email.trim(),
-        password: form.password,
-      });
-
-      const payload =
-        response?.data?.data ||
-        response?.data ||
-        response;
-
-      if (!payload?.token) {
-        throw new Error(
-          "Login succeeded but no authentication token was returned."
-        );
-      }
-
-      onLogin(payload);
+      const result = await authService.login(email, password, tenantId);
+      onLogin(result);
     } catch (err) {
-      console.error("CommunityOS login failed:", err);
-
-      const message =
-        err?.message ||
-        err?.error?.message ||
-        "Unable to sign in. Please check your credentials and try again.";
-
-      setError(message);
+      setError(err.response?.data?.message || 'Login failed');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="login-page">
-      {/* =====================================================
-          BRAND / PRODUCT SIDE
-      ====================================================== */}
-      <section className="login-hero">
-        <div className="login-hero-content">
-          <div className="brand-mark">
-            <span className="brand-icon">
-              <Sparkles size={17} />
-            </span>
-
-            <span>
-              Community<span className="brand-os">OS</span>
-            </span>
-          </div>
-
-          <div style={{ marginTop: 55 }}>
-            <span className="section-kicker">
-              COMMUNITY OPERATIONS PLATFORM
-            </span>
-
-            <h1>
-              Everything your community needs.
-              <br />
-              <span>One place.</span>
-            </h1>
-
-            <p className="login-hero-description">
-              Connect residents, community managers, service providers
-              and field teams through one coordinated operating layer.
-            </p>
-          </div>
-
-          <div className="login-platform-points">
-            <div className="login-platform-point">
-              <CheckCircle2 size={16} />
-              Essential community services
-            </div>
-
-            <div className="login-platform-point">
-              <Zap size={16} />
-              Real-time service coordination
-            </div>
-
-            <div className="login-platform-point">
-              <Users size={16} />
-              Connected communities
-            </div>
-
-            <div className="login-platform-point">
-              <ShieldCheck size={16} />
-              Secure role-based access
-            </div>
-          </div>
+    <div className="auth-container">
+      <div className="auth-card">
+        <div className="auth-header">
+          <h1>Welcome to CommunityOS</h1>
+          <p>Connecting communities to essential services</p>
         </div>
-      </section>
 
-      {/* =====================================================
-          LOGIN PANEL
-      ====================================================== */}
-      <section className="login-panel">
-        <div className="login-card">
-          <div className="login-card-header">
-            <span className="section-kicker">
-              WELCOME BACK
-            </span>
+        {error && <div className="alert alert-error">{error}</div>}
 
-            <h1>Sign in to CommunityOS</h1>
-
-            <p>
-              Access your community workspace and continue
-              where you left off.
-            </p>
+        <form onSubmit={handleLogin} className="auth-form">
+          <div className="form-group">
+            <label>Community</label>
+            <div className="input-wrapper">
+              <Building2 size={18} />
+              <select
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+                required
+              >
+                {TENANTS.map((tenant) => (
+                  <option key={tenant.id} value={tenant.id}>
+                    {tenant.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {error && (
-            <div
-              className="login-error"
-              role="alert"
-              style={{ marginBottom: 18 }}
-            >
-              {error}
+          <div className="form-group">
+            <label>Email Address</label>
+            <div className="input-wrapper">
+              <Mail size={18} />
+              <input
+                type="email"
+                placeholder="your@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
             </div>
-          )}
+          </div>
 
-          <form
-            className="login-form"
-            onSubmit={handleSubmit}
+          <div className="form-group">
+            <label>Password</label>
+            <div className="input-wrapper">
+              <Lock size={18} />
+              <input
+                type="password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            className="btn btn-primary btn-block"
+            disabled={loading}
           >
-            {/* EMAIL */}
-            <div className="form-field">
-              <label htmlFor="email">
-                Email address
-              </label>
+            {loading ? 'Signing in...' : 'Sign In'}
+          </button>
+        </form>
 
-              <div
-                className="input-wrapper"
-                style={{ position: "relative" }}
-              >
-                <Mail
-                  size={16}
-                  style={{
-                    position: "absolute",
-                    left: 13,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    color: "var(--muted)",
-                    pointerEvents: "none",
-                  }}
-                />
+        <div className="auth-footer">
+          <p>
+            Demo Credentials:
+            <br />
+            <strong>Resident:</strong> resident@example.com / resident123
+            <br />
+            <strong>Provider:</strong> aquaflow@provider.com / provider123
+            <br />
+            <strong>Manager:</strong> manager@greenvally.com / manager123
+          </p>
+        </div>
 
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  value={form.email}
-                  onChange={handleChange}
-                  disabled={loading}
-                  style={{ paddingLeft: 40 }}
-                />
-              </div>
-            </div>
-
-            {/* PASSWORD */}
-            <div className="form-field">
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <label htmlFor="password">
-                  Password
-                </label>
-
-                <button
-                  type="button"
-                  className="secondary-button"
-                  style={{
-                    minHeight: "auto",
-                    padding: 0,
-                    border: 0,
-                    background: "transparent",
-                    color: "var(--brand)",
-                    fontSize: 10,
-                  }}
-                  onClick={() =>
-                    setError(
-                      "Password recovery will be connected when the authentication recovery endpoint is enabled."
-                    )
-                  }
-                >
-                  Forgot password?
-                </button>
-              </div>
-
-              <div
-                className="input-wrapper"
-                style={{ position: "relative" }}
-              >
-                <LockKeyhole
-                  size={16}
-                  style={{
-                    position: "absolute",
-                    left: 13,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    color: "var(--muted)",
-                    pointerEvents: "none",
-                  }}
-                />
-
-                <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  placeholder="Enter your password"
-                  value={form.password}
-                  onChange={handleChange}
-                  disabled={loading}
-                  style={{
-                    paddingLeft: 40,
-                    paddingRight: 45,
-                  }}
-                />
-
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label={
-                    showPassword
-                      ? "Hide password"
-                      : "Show password"
-                  }
-                  onClick={() =>
-                    setShowPassword((current) => !current)
-                  }
-                  disabled={loading}
-                  style={{
-                    position: "absolute",
-                    right: 4,
-                    top: 3,
-                    width: 38,
-                    height: 38,
-                    border: 0,
-                    background: "transparent",
-                  }}
-                >
-                  {showPassword ? (
-                    <EyeOff size={16} />
-                  ) : (
-                    <Eye size={16} />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* SUBMIT */}
-            <button
-              type="submit"
-              className="primary-button login-button"
-              disabled={loading}
-              style={{
-                minHeight: 48,
-                marginTop: 5,
-              }}
-            >
-              {loading ? (
-                <>
-                  <span className="spin">◌</span>
-                  Signing in...
-                </>
-              ) : (
-                <>
-                  Sign in
-                  <ArrowRight size={17} />
-                </>
-              )}
-            </button>
-          </form>
-
- <div className="login-footer">
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      gap: 7,
-      marginBottom: 12,
-      color: "var(--success)",
-      fontWeight: 700,
-    }}
-  >
-    <ShieldCheck size={14} />
-    Secure CommunityOS access
-  </div>
-
-  <div style={{ marginBottom: 10 }}>
-    Don't have a CommunityOS account?
-  </div>
-
-  <button
-    type="button"
-    className="secondary-button"
-    onClick={onRegister}
-  >
-    Create an account
-  </button>
-</div>
+        <button
+          type="button"
+          className="link-btn"
+          onClick={onRegister}
+        >
+          Create new account
+        </button>
       </div>
-    </section>
-  </main>
-);
-}        
+    </div>
+  );
+}

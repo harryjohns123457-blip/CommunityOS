@@ -1,121 +1,141 @@
-import { useEffect, useState } from "react";
-import {
-  Building2,
-  Users,
-  Wrench,
-  AlertTriangle,
-  CheckCircle2,
-  Droplets,
-  Trash2,
-  Zap,
-  ShieldCheck,
-  RefreshCw,
-} from "lucide-react";
-import { getOrders } from "../services/api";
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, Loader, Building2 } from 'lucide-react';
+import * as communityService from '../services/communities.js';
 
-export default function ManagerDashboard({ token }) {
-  const [orders, setOrders] = useState([]);
+export default function ManagerDashboard({ token, user }) {
+  const [communities, setCommunities] = useState([]);
+  const [selectedCommunity, setSelectedCommunity] = useState(null);
+  const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  async function load() {
-    setLoading(true);
-    try {
-      const res = await getOrders({ limit: 100 });
-      setOrders(res.data.data || res.data.orders || []);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    if (token) load();
+    async function loadCommunities() {
+      try {
+        setLoading(true);
+        const data = await communityService.getCommunities();
+        setCommunities(data || []);
+        if (data?.length > 0) {
+          setSelectedCommunity(data[0]);
+        }
+      } catch (error) {
+        console.error('Failed to load communities:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (token) {
+      loadCommunities();
+    }
   }, [token]);
 
-  const active = orders.filter(
-    (o) => !["COMPLETED", "CANCELLED"].includes(o.status)
-  ).length;
+  useEffect(() => {
+    async function loadOverview() {
+      if (!selectedCommunity) return;
+
+      try {
+        const data = await communityService.getCommunityOverview(
+          selectedCommunity.id
+        );
+        setOverview(data);
+      } catch (error) {
+        console.error('Failed to load overview:', error);
+      }
+    }
+
+    loadOverview();
+  }, [selectedCommunity]);
+
+  if (loading) {
+    return <div className="page-content-center"><Loader className="spinner" /></div>;
+  }
 
   return (
-    <section className="manager-page">
-      <div className="page-heading">
-        <div>
-          <span className="section-kicker">
-            COMMUNITY OPERATIONS CENTER
-          </span>
-          <h1>Estate Operations</h1>
-          <p>Monitor services, residents and ongoing requests.</p>
-        </div>
-
-        <button className="secondary-button" onClick={load}>
-          <RefreshCw size={16} />
-          Refresh
-        </button>
+    <div className="manager-dashboard">
+      <div className="page-header">
+        <h1>Community Operations Center</h1>
+        <p>Manage your community operations</p>
       </div>
 
-      <div className="manager-grid">
-        <Metric icon={Building2} title="Buildings" value="8" />
-        <Metric icon={Users} title="Residents" value="324" />
-        <Metric icon={Wrench} title="Open Requests" value={active} />
-        <Metric icon={CheckCircle2} title="Resolved" value={orders.length - active} />
-      </div>
+      <div className="manager-layout">
+        <aside className="manager-sidebar">
+          <h3>Communities</h3>
+          <div className="communities-list">
+            {communities.map((community) => (
+              <button
+                key={community.id}
+                className={`community-item ${selectedCommunity?.id === community.id ? 'active' : ''}`}
+                onClick={() => setSelectedCommunity(community)}
+              >
+                <Building2 size={18} />
+                <div>
+                  <p>{community.name}</p>
+                  <span>{community.address}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </aside>
 
-      <div className="community-pulse-card">
-        <h2>Community Pulse</h2>
-
-        <div className="pulse-services">
-          <Pulse icon={Droplets} name="Water" status="Normal" green />
-          <Pulse icon={Zap} name="Electricity" status="Stable" green />
-          <Pulse icon={Trash2} name="Waste" status="On Schedule" green />
-          <Pulse icon={ShieldCheck} name="Security" status="Operational" green />
-          <Pulse icon={Wrench} name="Maintenance" status={`${active} Active`} />
-        </div>
-      </div>
-
-      <div className="requests-panel">
-        <h2>Latest Requests</h2>
-
-        {loading ? (
-          <p>Loading...</p>
-        ) : (
-          orders.slice(0, 8).map((order) => (
-            <div className="request-item" key={order.id}>
-              <div>
-                <strong>{order.service?.name || "Service Request"}</strong>
-                <span>#{order.id}</span>
+        <main className="manager-main">
+          {selectedCommunity && overview ? (
+            <>
+              <div className="overview-cards">
+                <div className="overview-card">
+                  <p className="card-label">Total Orders</p>
+                  <p className="card-value">{overview.ordersCount}</p>
+                </div>
+                <div className="overview-card">
+                  <p className="card-label">Active Incidents</p>
+                  <p className="card-value">{overview.incidentsCount}</p>
+                </div>
               </div>
 
-              <span className={`status-badge status-${order.status.toLowerCase()}`}>
-                {order.status}
-              </span>
+              <div className="section">
+                <h2>Recent Orders</h2>
+                {overview.recentOrders?.length === 0 ? (
+                  <div className="empty-state">
+                    <AlertCircle size={40} />
+                    <p>No recent orders</p>
+                  </div>
+                ) : (
+                  <div className="orders-table">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Order ID</th>
+                          <th>Status</th>
+                          <th>Total</th>
+                          <th>Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {overview.recentOrders?.map((order) => (
+                          <tr key={order.id}>
+                            <td>#{order.id.slice(0, 8)}</td>
+                            <td>
+                              <span className="status-badge">{order.status}</span>
+                            </td>
+                            <td>KSh {order.total}</td>
+                            <td>
+                              {new Date(order.createdAt).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">
+              <AlertCircle size={40} />
+              <p>Select a community to view overview</p>
             </div>
-          ))
-        )}
+          )}
+        </main>
       </div>
-    </section>
-  );
-}
-
-function Metric({ icon: Icon, title, value }) {
-  return (
-    <div className="metric-card">
-      <Icon size={22} />
-      <span>{title}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function Pulse({ icon: Icon, name, status, green }) {
-  return (
-    <div className="pulse-row">
-      <div>
-        <Icon size={18} />
-        <span>{name}</span>
-      </div>
-
-      <span className={green ? "pulse-good" : "pulse-warning"}>
-        {status}
-      </span>
     </div>
   );
 }

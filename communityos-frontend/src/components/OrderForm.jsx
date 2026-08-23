@@ -1,372 +1,145 @@
-import { useState } from "react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckCircle2,
-  ClipboardList,
-  MapPin,
-  Package,
-} from "lucide-react";
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, Loader } from 'lucide-react';
+import * as orderService from '../services/orders.js';
+import * as serviceService from '../services/services.js';
+import * as communityService from '../services/communities.js';
 
-import ServicesSelect from "./ServicesSelect";
-import { createOrder } from "../services/api";
+export default function OrderForm({ token, onCreated }) {
+  const [services, setServices] = useState([]);
+  const [communities, setCommunities] = useState([]);
+  const [selectedService, setSelectedService] = useState('');
+  const [selectedCommunity, setSelectedCommunity] = useState('');
+  const [quantity, setQuantity] = useState(1);
+  const [notes, setNotes] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-export default function OrderForm({
-  token,
-  onCreated,
-  onBack,
-}) {
-  const [service, setService] = useState(null);
-
-  const [form, setForm] = useState({
-    quantity: 1,
-    notes: "",
-    location: "",
-  });
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(null);
-
-  function handleChange(event) {
-    const { name, value } = event.target;
-
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-
-    if (error) {
-      setError("");
-    }
-  }
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-
-    if (!service) {
-      setError("Please select a service.");
-      return;
+  useEffect(() => {
+    async function loadData() {
+      try {
+        setLoading(true);
+        const [servicesData, communitiesData] = await Promise.all([
+          serviceService.getServices(),
+          communityService.getCommunities(),
+        ]);
+        setServices(servicesData || []);
+        setCommunities(communitiesData || []);
+        if (servicesData?.length > 0) {
+          setSelectedService(servicesData[0].id);
+        }
+        if (communitiesData?.length > 0) {
+          setSelectedCommunity(communitiesData[0].id);
+        }
+      } catch (error) {
+        setError('Failed to load form data');
+      } finally {
+        setLoading(false);
+      }
     }
 
-    if (!form.location.trim()) {
-      setError("Please provide the service location.");
-      return;
+    if (token) {
+      loadData();
     }
+  }, [token]);
 
-    const quantity = Number(form.quantity);
-
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setError("Quantity must be greater than zero.");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError('');
+    setSubmitting(true);
 
     try {
-      const response = await createOrder({
-        serviceId: service.id,
-        quantity,
-        notes: form.notes.trim() || undefined,
-        location: form.location.trim(),
+      const order = await orderService.createOrder({
+        communityId: selectedCommunity,
+        items: [
+          {
+            serviceId: selectedService,
+            quantity: parseInt(quantity),
+          },
+        ],
+        notes,
       });
-
-      const order =
-        response?.data?.data ||
-        response?.data?.order ||
-        response?.data;
-
-      setSuccess(order || {});
-
+      onCreated();
     } catch (err) {
-      setError(
-        err?.message ||
-          "Unable to create your service request."
-      );
+      setError(err.response?.data?.message || 'Failed to create order');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   }
 
-  if (success) {
-    return (
-      <section className="order-page">
-        <div className="order-success">
-          <div className="success-icon">
-            <CheckCircle2 size={34} />
-          </div>
-
-          <span className="section-kicker">
-            REQUEST CREATED
-          </span>
-
-          <h1>Your request has been submitted.</h1>
-
-          <p>
-            CommunityOS has received your request and will
-            keep you updated as it moves through the service
-            workflow.
-          </p>
-
-          {success.id && (
-            <div className="request-reference">
-              <span>Request reference</span>
-              <strong>#{success.id}</strong>
-            </div>
-          )}
-
-          <div className="success-actions">
-            <button
-              type="button"
-              className="primary-button"
-              onClick={() => onCreated?.(success)}
-            >
-              View activity
-              <ArrowRight size={17} />
-            </button>
-
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => {
-                setSuccess(null);
-                setService(null);
-                setForm({
-                  quantity: 1,
-                  notes: "",
-                  location: "",
-                });
-              }}
-            >
-              Create another request
-            </button>
-          </div>
-        </div>
-      </section>
-    );
+  if (loading) {
+    return <div className="page-content-center"><Loader className="spinner" /></div>;
   }
 
   return (
-    <section className="order-page">
-      <div className="page-heading">
-        <div>
-          <span className="section-kicker">
-            SERVICE REQUEST
-          </span>
+    <div className="order-form">
+      <div className="page-header">
+        <h1>Request Service</h1>
+        <p>Order essential services for your unit</p>
+      </div>
 
-          <h1>Request a service</h1>
+      {error && <div className="alert alert-error">{error}</div>}
 
-          <p>
-            Tell us what you need and where it should be
-            delivered or completed.
-          </p>
-        </div>
-
-        {onBack && (
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={onBack}
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label>Community</label>
+          <select
+            value={selectedCommunity}
+            onChange={(e) => setSelectedCommunity(e.target.value)}
+            required
           >
-            <ArrowLeft size={16} />
-            Back
-          </button>
-        )}
-      </div>
-
-      {error && (
-        <div className="form-error" role="alert">
-          {error}
-        </div>
-      )}
-
-      <div className="order-layout">
-        <div className="order-form-card">
-          <div className="order-step">
-            <div className="step-number">1</div>
-
-            <div>
-              <h2>Choose your service</h2>
-
-              <p>
-                Select the service you need from your
-                community catalogue.
-              </p>
-            </div>
-          </div>
-
-          <ServicesSelect
-            token={token}
-            value={service}
-            onChange={setService}
-            onContinue={() =>
-              document
-                .getElementById("order-details")
-                ?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "center",
-                })
-            }
-          />
-
-          <div
-            className="order-divider"
-            id="order-details"
-          />
-
-          <form onSubmit={handleSubmit}>
-            <div className="order-step">
-              <div className="step-number">2</div>
-
-              <div>
-                <h2>Request details</h2>
-
-                <p>
-                  Give the provider enough information to
-                  fulfil your request correctly.
-                </p>
-              </div>
-            </div>
-
-            <div className="order-fields">
-              <div className="form-field">
-                <label htmlFor="quantity">
-                  Quantity
-                </label>
-
-                <div className="input-wrapper">
-                  <Package size={18} />
-
-                  <input
-                    id="quantity"
-                    name="quantity"
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={form.quantity}
-                    onChange={handleChange}
-                    disabled={loading}
-                  />
-                </div>
-              </div>
-
-              <div className="form-field">
-                <label htmlFor="location">
-                  Service location
-                </label>
-
-                <div className="input-wrapper">
-                  <MapPin size={18} />
-
-                  <input
-                    id="location"
-                    name="location"
-                    type="text"
-                    value={form.location}
-                    onChange={handleChange}
-                    placeholder="e.g. House B12, Green Valley Estate"
-                    disabled={loading}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="form-field full-width">
-                <label htmlFor="notes">
-                  Additional notes
-                </label>
-
-                <div className="textarea-wrapper">
-                  <ClipboardList size={18} />
-
-                  <textarea
-                    id="notes"
-                    name="notes"
-                    rows="5"
-                    value={form.notes}
-                    onChange={handleChange}
-                    placeholder="Add any useful instructions or details..."
-                    disabled={loading}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="order-summary">
-              <div>
-                <span>Selected service</span>
-
-                <strong>
-                  {service?.name ||
-                    service?.title ||
-                    "Not selected"}
-                </strong>
-              </div>
-
-              <div>
-                <span>Quantity</span>
-
-                <strong>{form.quantity}</strong>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="primary-button order-submit"
-              disabled={loading || !service}
-            >
-              {loading ? (
-                <>
-                  <span className="button-spinner" />
-                  Submitting request...
-                </>
-              ) : (
-                <>
-                  Submit request
-                  <ArrowRight size={17} />
-                </>
-              )}
-            </button>
-          </form>
+            {communities.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <aside className="order-info-card">
-          <div className="order-info-icon">
-            <ClipboardList size={22} />
-          </div>
+        <div className="form-group">
+          <label>Service</label>
+          <select
+            value={selectedService}
+            onChange={(e) => setSelectedService(e.target.value)}
+            required
+          >
+            {services.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} - KSh {s.unitPrice}
+              </option>
+            ))}
+          </select>
+        </div>
 
-          <span className="section-kicker">
-            HOW IT WORKS
-          </span>
+        <div className="form-group">
+          <label>Quantity</label>
+          <input
+            type="number"
+            min="1"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            required
+          />
+        </div>
 
-          <h2>
-            One request. A coordinated response.
-          </h2>
+        <div className="form-group">
+          <label>Notes (Optional)</label>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Add any special instructions..."
+            rows="4"
+          ></textarea>
+        </div>
 
-          <div className="workflow-list">
-            <div>
-              <span>01</span>
-              <p>Submit your service request.</p>
-            </div>
-
-            <div>
-              <span>02</span>
-              <p>
-                CommunityOS routes it to the appropriate
-                provider.
-              </p>
-            </div>
-
-            <div>
-              <span>03</span>
-              <p>
-                Track progress from your activity timeline.
-              </p>
-            </div>
-          </div>
-        </aside>
-      </div>
-    </section>
+        <button
+          type="submit"
+          className="btn btn-primary btn-block"
+          disabled={submitting}
+        >
+          {submitting ? 'Creating order...' : 'Create Order'}
+        </button>
+      </form>
+    </div>
   );
 }

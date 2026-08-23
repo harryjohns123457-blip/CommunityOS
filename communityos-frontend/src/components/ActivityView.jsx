@@ -1,329 +1,156 @@
-import { useEffect, useState } from "react";
-import {
-  AlertCircle,
-  ArrowRight,
-  CheckCircle2,
-  Clock3,
-  Package,
-  RefreshCw,
-  XCircle,
-} from "lucide-react";
+import React, { useEffect, useState } from 'react';
+import { Clock, CheckCircle, AlertCircle, Loader } from 'lucide-react';
+import * as orderService from '../services/orders.js';
+import { getSocket, joinOrder } from '../services/socket.js';
 
-import { getOrders } from "../services/api";
-
-const STATUS_CONFIG = {
-  PENDING: {
-    label: "Pending",
-    icon: Clock3,
-    className: "pending",
-  },
-  CONFIRMED: {
-    label: "Confirmed",
-    icon: CheckCircle2,
-    className: "confirmed",
-  },
-  IN_PROGRESS: {
-    label: "In progress",
-    icon: RefreshCw,
-    className: "in-progress",
-  },
-  COMPLETED: {
-    label: "Completed",
-    icon: CheckCircle2,
-    className: "completed",
-  },
-  CANCELLED: {
-    label: "Cancelled",
-    icon: XCircle,
-    className: "cancelled",
-  },
-  CANCELED: {
-    label: "Cancelled",
-    icon: XCircle,
-    className: "cancelled",
-  },
+const statusColors = {
+  CREATED: 'status-pending',
+  PROVIDER_ACCEPTED: 'status-info',
+  WORKER_ASSIGNED: 'status-info',
+  IN_PROGRESS: 'status-active',
+  COMPLETED: 'status-success',
+  CANCELLED: 'status-error',
 };
 
-function getStatus(status) {
-  const key = String(status || "PENDING").toUpperCase();
-
-  return (
-    STATUS_CONFIG[key] || {
-      label: key.replaceAll("_", " "),
-      icon: AlertCircle,
-      className: "pending",
-    }
-  );
-}
-
-function formatDate(date) {
-  if (!date) return "Date unavailable";
-
-  const parsed = new Date(date);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "Date unavailable";
-  }
-
-  return parsed.toLocaleDateString("en-KE", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatTime(date) {
-  if (!date) return "";
-
-  const parsed = new Date(date);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
-  }
-
-  return parsed.toLocaleTimeString("en-KE", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+const statusLabels = {
+  CREATED: 'Order Created',
+  PROVIDER_ACCEPTED: 'Accepted by Provider',
+  WORKER_ASSIGNED: 'Worker Assigned',
+  IN_PROGRESS: 'In Progress',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+};
 
 export default function ActivityView({ token }) {
   const [orders, setOrders] = useState([]);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [timeline, setTimeline] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  async function loadActivity() {
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await getOrders({
-        limit: 50,
-      });
-
-      const data =
-        response?.data?.data ||
-        response?.data?.orders ||
-        response?.data ||
-        [];
-
-      setOrders(Array.isArray(data) ? data : []);
-    } catch (err) {
-      setError(
-        err?.message ||
-          "Unable to load your activity."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
 
   useEffect(() => {
+    async function loadOrders() {
+      try {
+        setLoading(true);
+        const data = await orderService.getOrders();
+        setOrders(data.data || []);
+        if (data.data?.length > 0) {
+          setSelectedOrder(data.data[0]);
+        }
+      } catch (error) {
+        console.error('Failed to load orders:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
     if (token) {
-      loadActivity();
+      loadOrders();
     }
   }, [token]);
 
+  useEffect(() => {
+    async function loadTimeline() {
+      if (!selectedOrder) return;
+
+      try {
+        const data = await orderService.getOrderTimeline(selectedOrder.id);
+        setTimeline(data || []);
+      } catch (error) {
+        console.error('Failed to load timeline:', error);
+      }
+    }
+
+    loadTimeline();
+
+    // Join Socket.IO channel
+    const socket = getSocket();
+    if (socket && selectedOrder) {
+      joinOrder(selectedOrder.id);
+
+      // Listen for timeline updates
+      socket.on('timeline:updated', (event) => {
+        loadTimeline();
+      });
+
+      return () => {
+        socket.off('timeline:updated');
+      };
+    }
+  }, [selectedOrder]);
+
+  if (loading) {
+    return <div className="page-content-center"><Loader className="spinner" /></div>;
+  }
+
   return (
-    <section className="activity-page">
-      <div className="page-heading">
-        <div>
-          <span className="section-kicker">
-            SYNC TIMELINE
-          </span>
-
-          <h1>Your activity</h1>
-
-          <p>
-            Follow your service requests from submission
-            through completion.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={loadActivity}
-          disabled={loading}
-        >
-          <RefreshCw
-            size={16}
-            className={loading ? "spin" : ""}
-          />
-          Refresh
-        </button>
-      </div>
-
-      {error && (
-        <div className="dashboard-error" role="alert">
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="activity-list">
-          {[1, 2, 3, 4].map((item) => (
-            <div
-              className="activity-skeleton"
-              key={item}
-            />
-          ))}
-        </div>
-      ) : orders.length === 0 ? (
-        <div className="empty-card activity-empty">
-          <div className="empty-icon">
-            <Package size={26} />
-          </div>
-
-          <h2>No activity yet</h2>
-
-          <p>
-            Once you submit a service request, its progress
-            will appear here.
-          </p>
-        </div>
-      ) : (
-        <div className="activity-layout">
-          <div className="activity-list">
-            {orders.map((order) => {
-              const status = getStatus(order.status);
-              const StatusIcon = status.icon;
-
-              const createdAt =
-                order.createdAt ||
-                order.created_at;
-
-              const serviceName =
-                order.service?.name ||
-                order.serviceName ||
-                order.service?.title ||
-                "Service request";
-
-              return (
-                <article
-                  className="activity-card"
+    <div className="activity-view">
+      <div className="activity-layout">
+        <div className="orders-panel">
+          <h2>Your Orders</h2>
+          <div className="orders-list">
+            {orders.length === 0 ? (
+              <div className="empty-state">
+                <AlertCircle size={40} />
+                <p>No orders yet</p>
+              </div>
+            ) : (
+              orders.map((order) => (
+                <button
                   key={order.id}
+                  className={`order-item ${selectedOrder?.id === order.id ? 'active' : ''}`}
+                  onClick={() => setSelectedOrder(order)}
                 >
-                  <div
-                    className={`activity-status-icon ${status.className}`}
-                  >
-                    <StatusIcon size={19} />
+                  <div className="order-header">
+                    <p className="order-id">#{order.id.slice(0, 8)}</p>
+                    <span className={`status-badge ${statusColors[order.status]}`}>
+                      {statusLabels[order.status]}
+                    </span>
                   </div>
-
-                  <div className="activity-main">
-                    <div className="activity-card-heading">
-                      <div>
-                        <span className="activity-date">
-                          {formatDate(createdAt)}
-                          {formatTime(createdAt) &&
-                            ` · ${formatTime(createdAt)}`}
-                        </span>
-
-                        <h2>{serviceName}</h2>
-                      </div>
-
-                      <span
-                        className={`status-badge status-${status.className}`}
-                      >
-                        {status.label}
-                      </span>
-                    </div>
-
-                    <div className="activity-details">
-                      <div>
-                        <span>Reference</span>
-
-                        <strong>
-                          #{order.id || "—"}
-                        </strong>
-                      </div>
-
-                      <div>
-                        <span>Quantity</span>
-
-                        <strong>
-                          {order.quantity || 1}
-                        </strong>
-                      </div>
-
-                      {order.location && (
-                        <div>
-                          <span>Location</span>
-
-                          <strong>
-                            {order.location}
-                          </strong>
-                        </div>
-                      )}
-                    </div>
-
-                    {order.notes && (
-                      <p className="activity-notes">
-                        {order.notes}
-                      </p>
-                    )}
-
-                    <button
-                      type="button"
-                      className="activity-link"
-                    >
-                      View request
-                      <ArrowRight size={15} />
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
+                  <p className="order-date">
+                    {new Date(order.createdAt).toLocaleDateString()}
+                  </p>
+                </button>
+              ))
+            )}
           </div>
-
-          <aside className="activity-summary">
-            <span className="section-kicker">
-              REQUEST SUMMARY
-            </span>
-
-            <h2>Service activity</h2>
-
-            <div className="activity-stat">
-              <span>Total requests</span>
-              <strong>{orders.length}</strong>
-            </div>
-
-            <div className="activity-stat">
-              <span>Active</span>
-              <strong>
-                {
-                  orders.filter(
-                    (order) =>
-                      ![
-                        "COMPLETED",
-                        "CANCELLED",
-                        "CANCELED",
-                      ].includes(
-                        String(
-                          order.status || ""
-                        ).toUpperCase()
-                      )
-                  ).length
-                }
-              </strong>
-            </div>
-
-            <div className="activity-stat">
-              <span>Completed</span>
-              <strong>
-                {
-                  orders.filter(
-                    (order) =>
-                      String(
-                        order.status || ""
-                      ).toUpperCase() === "COMPLETED"
-                  ).length
-                }
-              </strong>
-            </div>
-          </aside>
         </div>
-      )}
-    </section>
+
+        <div className="timeline-panel">
+          {selectedOrder ? (
+            <>
+              <h2>Order Timeline</h2>
+              <div className="timeline">
+                {timeline.length === 0 ? (
+                  <div className="empty-state">
+                    <Clock size={40} />
+                    <p>No events yet</p>
+                  </div>
+                ) : (
+                  timeline.map((event, index) => (
+                    <div key={event.id} className="timeline-event">
+                      <div className="timeline-marker">
+                        <div className="marker-dot"></div>
+                        {index < timeline.length - 1 && <div className="marker-line"></div>}
+                      </div>
+                      <div className="timeline-content">
+                        <p className="event-type">{event.type}</p>
+                        <p className="event-time">
+                          {new Date(event.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">
+              <AlertCircle size={40} />
+              <p>Select an order to view timeline</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

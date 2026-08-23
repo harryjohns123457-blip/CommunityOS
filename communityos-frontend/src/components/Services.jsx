@@ -1,190 +1,81 @@
-import { useEffect, useState } from "react";
-import {
-  ArrowRight,
-  Droplets,
-  Flame,
-  Package,
-  ShieldCheck,
-  Wrench,
-  Zap,
-} from "lucide-react";
-
-import { getServices } from "../services/api";
-
-const SERVICE_ICONS = {
-  water: Droplets,
-  gas: Flame,
-  electricity: Zap,
-  maintenance: Wrench,
-  security: ShieldCheck,
-};
-
-function getIcon(service) {
-  const value = String(
-    service?.slug || service?.name || ""
-  ).toLowerCase();
-
-  const key = Object.keys(SERVICE_ICONS).find((item) =>
-    value.includes(item)
-  );
-
-  return SERVICE_ICONS[key] || Package;
-}
+import React, { useEffect, useState } from 'react';
+import { Droplet, AlertCircle, Loader } from 'lucide-react';
+import * as serviceService from '../services/services.js';
+import * as providerService from '../services/providers.js';
 
 export default function Services({ token, onRequest }) {
   const [services, setServices] = useState([]);
+  const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [selectedService, setSelectedService] = useState(null);
 
   useEffect(() => {
-    let mounted = true;
-
     async function loadServices() {
-      setLoading(true);
-      setError("");
-
       try {
-        const response = await getServices({
-          active: true,
-        });
-
-        if (!mounted) return;
-
-        const data =
-          response?.data?.data ||
-          response?.data?.services ||
-          response?.data ||
-          [];
-
-        setServices(Array.isArray(data) ? data : []);
-      } catch (err) {
-        if (!mounted) return;
-
-        setError(
-          err?.message ||
-            "Unable to load available services."
-        );
+        setLoading(true);
+        const [servicesData, providersData] = await Promise.all([
+          serviceService.getServices(),
+          providerService.getProviders(),
+        ]);
+        setServices(servicesData || []);
+        setProviders(providersData || []);
+      } catch (error) {
+        console.error('Failed to load services:', error);
       } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     }
 
     if (token) {
       loadServices();
     }
-
-    return () => {
-      mounted = false;
-    };
   }, [token]);
 
+  if (loading) {
+    return <div className="page-content-center"><Loader className="spinner" /></div>;
+  }
+
   return (
-    <section className="services-page">
-      <div className="page-heading">
-        <div>
-          <span className="section-kicker">
-            SERVICE DIRECTORY
-          </span>
-
-          <h1>Services for your community</h1>
-
-          <p>
-            Find what you need and request it directly
-            through CommunityOS.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className="primary-button"
-          onClick={onRequest}
-        >
-          Request a service
-          <ArrowRight size={17} />
-        </button>
+    <div className="services-page">
+      <div className="page-header">
+        <h1>Available Services</h1>
+        <p>Browse and request services from verified providers</p>
       </div>
 
-      {error && (
-        <div className="dashboard-error" role="alert">
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="service-directory-grid">
-          {[1, 2, 3, 4, 5, 6].map((item) => (
-            <div
-              className="service-directory-skeleton"
-              key={item}
-            />
-          ))}
-        </div>
-      ) : services.length === 0 ? (
-        <div className="empty-card services-empty">
-          <Package size={28} />
-
-          <h2>No services available</h2>
-
-          <p>
-            There are currently no active services
-            available for your community.
-          </p>
+      {services.length === 0 ? (
+        <div className="empty-state">
+          <AlertCircle size={40} />
+          <p>No services available</p>
         </div>
       ) : (
-        <div className="service-directory-grid">
+        <div className="services-grid">
           {services.map((service) => {
-            const Icon = getIcon(service);
-
+            const provider = providers.find((p) => p.id === service.providerId);
             return (
-              <article
-                className="service-directory-card"
-                key={service.id}
-              >
-                <div className="service-directory-icon">
-                  <Icon size={22} />
+              <div key={service.id} className="service-card">
+                <div className="service-icon">
+                  <Droplet size={32} />
                 </div>
-
-                <div className="service-directory-content">
-                  <div className="service-title-row">
-                    <h2>
-                      {service.name ||
-                        service.title ||
-                        "Community service"}
-                    </h2>
-
-                    <span className="available-badge">
-                      Available
-                    </span>
-                  </div>
-
-                  <p>
-                    {service.description ||
-                      "A community service available through CommunityOS."}
-                  </p>
-
-                  <div className="service-card-footer">
-                    <span>
-                      {service.category ||
-                        "Community service"}
-                    </span>
-
-                    <button
-                      type="button"
-                      className="service-action"
-                      onClick={onRequest}
-                    >
-                      Request
-                      <ArrowRight size={15} />
-                    </button>
-                  </div>
+                <h3>{service.name}</h3>
+                <p className="service-description">{service.description}</p>
+                <p className="service-provider">{provider?.companyName}</p>
+                <div className="service-footer">
+                  <span className="service-price">KSh {service.unitPrice}</span>
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={() => {
+                      setSelectedService(service);
+                      onRequest();
+                    }}
+                  >
+                    Request
+                  </button>
                 </div>
-              </article>
+              </div>
             );
           })}
         </div>
       )}
-    </section>
+    </div>
   );
 }
