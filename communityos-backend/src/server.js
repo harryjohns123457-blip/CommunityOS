@@ -5,17 +5,20 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import http from 'http';
-
 import { Server } from 'socket.io';
 
 import apiRouter from './routes/index.js';
 import { prisma } from './db/connection.js';
 import { initializeSupabase } from './config/supabase.js';
+import { initializeRedis, getRedisClient } from './config/redis.js';
+import logger from './config/logger.js';
+import { requestLogger, errorHandler } from './middleware/index.js';
+import { on, EVENTS } from './utils/events.js';
 
 const app = express();
 const server = http.createServer(app);
 
-const PORT = Number(process.env.PORT || 5000);
+const PORT = Number(process.env.PORT || 3000);
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
@@ -28,6 +31,12 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   'http://127.0.0.1:5500',
 ].filter(Boolean);
+
+/*
+|--------------------------------------------------------------------------
+| SECURITY MIDDLEWARE
+|--------------------------------------------------------------------------
+*/
 
 app.use(
   helmet({
@@ -52,9 +61,17 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(requestLogger);
+
+/*
+|--------------------------------------------------------------------------
+| HEALTH CHECK
+|--------------------------------------------------------------------------
+*/
 
 app.get('/api/health', async (req, res) => {
   let database = 'unknown';
+  let redis = 'unknown';
 
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -63,13 +80,28 @@ app.get('/api/health', async (req, res) => {
     database = 'disconnected';
   }
 
+  try {
+    const redisClient = getRedisClient();
+    await redisClient.ping();
+    redis = 'connected';
+  } catch {
+    redis = 'disconnected';
+  }
+
   res.json({
     success: true,
     message: 'CommunityOS API is running',
     database,
+    redis,
     timestamp: new Date().toISOString(),
   });
 });
+
+/*
+|--------------------------------------------------------------------------
+| ROUTES
+|--------------------------------------------------------------------------
+*/
 
 app.use('/api', apiRouter);
 
@@ -80,26 +112,11 @@ app.use((req, res) => {
   });
 });
 
-app.use((error, req, res, next) => {
-  console.error(error);
-
-  if (error.message === 'CORS origin not allowed') {
-    return res.status(403).json({
-      success: false,
-      message: 'CORS origin not allowed',
-    });
-  }
-
-  res.status(error.statusCode || 500).json({
-    success: false,
-    message:
-      error.message || 'Internal server error',
-  });
-});
+app.use(errorHandler);
 
 /*
 |--------------------------------------------------------------------------
-| Socket.IO
+| SOCKET.IO REAL-TIME
 |--------------------------------------------------------------------------
 */
 
@@ -108,47 +125,130 @@ const io = new Server(server, {
     origin: allowedOrigins,
     credentials: true,
   },
+  transports: ['websocket', 'polling'],
 });
 
-io.on('connection', (socket) => {
-  console.log(`Socket connected: ${socket.id}`);
+const connectedUsers = new Map();
 
-  socket.on('join:order', (orderId) => {
-    if (orderId) {
-      socket.join(`order:${orderId}`);
+io.on('connection', (socket) => {
+  logger.info({ socketId: socket.id }, 'Socket connected');
+
+  // Track user connection
+  socket.on('auth', (data) => {
+    if (data?.userId) {
+      connectedUsers.set(socket.id, data.userId);
+      socket.userId = data.userId;
+      socket.tenantId = data.tenantId;
     }
   });
 
+  // Join order channel
+  socket.on('join:order', (orderId) => {
+    if (orderId) {
+      socket.join(`order:${orderId}`);
+      logger.info({ socketId: socket.id, orderId }, 'Joined order channel');
+    }
+  });
+
+  // Leave order channel
   socket.on('leave:order', (orderId) => {
     if (orderId) {
       socket.leave(`order:${orderId}`);
     }
   });
 
+  // Join provider channel
   socket.on('join:provider', (providerId) => {
     if (providerId) {
       socket.join(`provider:${providerId}`);
+      logger.info({ socketId: socket.id, providerId }, 'Joined provider channel');
     }
   });
 
+  // Join community channel
   socket.on('join:community', (communityId) => {
     if (communityId) {
       socket.join(`community:${communityId}`);
+      logger.info({ socketId: socket.id, communityId }, 'Joined community channel');
     }
   });
 
+  // Join tenant channel
+  socket.on('join:tenant', (tenantId) => {
+    if (tenantId) {
+      socket.join(`tenant:${tenantId}`);
+    }
+  });
+
+  // Handle disconnect
   socket.on('disconnect', () => {
-    console.log(`Socket disconnected: ${socket.id}`);
+    connectedUsers.delete(socket.id);
+    logger.info({ socketId: socket.id }, 'Socket disconnected');
   });
 });
+
+// Export io for use in services
+export function broadcastToOrder(orderId, event, data) {
+  io.to(`order:${orderId}`).emit(event, data);
+}
+
+export function broadcastToProvider(providerId, event, data) {
+  io.to(`provider:${providerId}`).emit(event, data);
+}
+
+export function broadcastToCommunity(communityId, event, data) {
+  io.to(`community:${communityId}`).emit(event, data);
+}
+
+export function broadcastToTenant(tenantId, event, data) {
+  io.to(`tenant:${tenantId}`).emit(event, data);
+}
+
+/*
+|--------------------------------------------------------------------------
+| EVENT LISTENERS
+|--------------------------------------------------------------------------
+*/
+
+on(EVENTS.ORDER_CREATED, ({ order }) => {
+  broadcastToTenant(order.tenantId, 'order:created', order);
+  if (order.communityId) {
+    broadcastToCommunity(order.communityId, 'order:created', order);
+  }
+});
+
+on(EVENTS.ORDER_ACCEPTED, ({ order }) => {
+  broadcastToOrder(order.id, 'order:accepted', order);
+  if (order.providerId) {
+    broadcastToProvider(order.providerId, 'order:accepted', order);
+  }
+});
+
+on(EVENTS.ORDER_IN_PROGRESS, ({ order }) => {
+  broadcastToOrder(order.id, 'order:in_progress', order);
+});
+
+on(EVENTS.ORDER_COMPLETED, ({ order }) => {
+  broadcastToOrder(order.id, 'order:completed', order);
+});
+
+/*
+|--------------------------------------------------------------------------
+| SERVER STARTUP
+|--------------------------------------------------------------------------
+*/
 
 async function startServer() {
   try {
     initializeSupabase();
-
+    await initializeRedis();
     await prisma.$connect();
 
     server.listen(PORT, () => {
+      logger.info(
+        { port: PORT, origins: allowedOrigins.join(', ') },
+        'CommunityOS Backend started'
+      );
       console.log('');
       console.log('========================================');
       console.log('        COMMUNITYOS BACKEND');
@@ -160,17 +260,23 @@ async function startServer() {
       console.log('');
     });
   } catch (error) {
-    console.error('Failed to start CommunityOS:', error);
+    logger.error({ error }, 'Failed to start CommunityOS');
     process.exit(1);
   }
 }
 
+/*
+|--------------------------------------------------------------------------
+| GRACEFUL SHUTDOWN
+|--------------------------------------------------------------------------
+*/
+
 async function shutdown(signal) {
-  console.log(`${signal} received. Shutting down...`);
+  logger.info({ signal }, 'Shutdown signal received');
 
   await prisma.$disconnect();
-
   server.close(() => {
+    logger.info('Server closed');
     process.exit(0);
   });
 }
